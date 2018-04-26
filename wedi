@@ -1,0 +1,190 @@
+#!/bin/sh
+
+# Predmet - IOS (Operačné systémy)
+# Projekt - Skript wedi - wrapper textového editoru s možnosťou automatického výberu súboru
+# Autor   - Radoslav Grenčík (xgrenc00@stud.fit.vutbr.cz)
+# Dátum   - 28.03.2018
+# Popis   - http://www.fit.vutbr.cz/study/courses/IOS/public/Lab/projekty/projekt1/projekt1.pdf
+
+export LC_ALL=POSIX
+
+testRealPath()
+{
+    `realpath ~ > /dev/null 2>&1`
+    testExit=$?
+    if [ 0 -ne "$testExit" ]; then
+        echo "ERR: Utility realpath nie je dostupná.">&2
+        exit $testExit
+    fi
+}
+
+testVariables()
+{
+    if [ -z "$WEDI_RC" ]; then
+        echo "ERR: Premenná WEDI_RC nie je nastavená.">&2
+        exit 5
+    elif [ ! -f "$WEDI_RC" ]; then
+        pathWEDI_RC=`echo "$WEDI_RC" | rev | cut -d '/' -f2- | rev`
+        `mkdir -p "$pathWEDI_RC" ; touch "$WEDI_RC"`
+    fi
+
+    if [ -z "$EDITOR" ] && [ -z "$VISUAL" ]; then
+        nastroj=`vi`
+    elif [ -z "$EDITOR" ]; then
+        nastroj=$VISUAL
+    else
+        nastroj=$EDITOR
+    fi
+
+    platform=`uname`
+}
+
+makeSedPath()
+{
+    sedPath=`echo "$1" | sed "s/\//\\\\\;\//g" | tr -d ';' | sed "s/ /\\\ /g"`
+}
+
+editFile()
+{
+    if [ ! -f "$2" ]; then
+        echo "ERR: Súbor neexistuje.">&2
+        makeSedPath "$2"
+        deleteFileName=`echo "$2" | rev | cut -d '/' -f1 | rev`
+        deleteCode=`sed -n "/^$deleteFileName|.*|.*|$sedPath$/p" "$WEDI_RC"`
+        if [ ! -z "$deleteCode" ]; then
+            if [ "$platform" = "FreeBSD" ]; then
+                `sed -i '' "/^$deleteFileName|.*|.*|$sedPath$/d" "$WEDI_RC"`
+            else
+                `sed -i "/^$deleteFileName|.*|.*|$sedPath$/d" "$WEDI_RC"`
+            fi
+            echo "Súbor $deleteFileName bol zmazaný z WEDI_RC."
+        fi
+        exit 5
+    fi
+    $1 "$2"
+    exitCode=$?
+    fileName=`echo "$2" | rev | cut -d '/' -f1 | rev`
+    printf "$fileName|`date +%F" "%H:%M:%S`.0|$1|$2\n" >> $WEDI_RC
+    exit $exitCode
+}
+
+findLastFile()
+{
+    makeSedPath "$1"
+    lastFile=`sed -n "/$sedPath\/[^\/]*$/p" "$WEDI_RC" | tr -d '\n' | rev | cut -d '|' -f1 | rev`
+    if [ -z "$lastFile" ]; then
+        echo "ERR: V tomto adresári nebol upravovaný žiadny súbor.">&2
+        exit 5
+    fi
+}
+
+findMostEdited()
+{
+    makeSedPath "$1"
+    mostEdited=`sed -n "/$sedPath\/[^\/]*$/p" "$WEDI_RC" | cut -d '|' -f4 | sort | uniq -c | sort -nr | rev | cut -d ' ' -f1 | rev | tr '\n' '|' | cut -d '|' -f1`
+    if [ -z "$mostEdited" ]; then
+        echo "ERR: V adresári nebol upravovaný žiadny súbor.">&2
+        exit 5
+    fi
+}
+
+printAllEdited()
+{
+    makeSedPath "$1"
+    printOut=`sed -n "/$sedPath\/[^\/]*$/p" "$WEDI_RC" | cut -d '|' -f4 | sort | uniq | rev | cut -d '/' -f1 | rev`
+    if [ -z "$printOut" ]; then
+        echo "ERR: V adresári nebol upravovaný žiadny súbor.">&2
+        exit 5
+    else
+        echo "$printOut"
+        exit 0
+    fi
+}
+
+printDate()
+{
+    makeSedPath "$1"
+    printf "totomusispotomvymazat12345|$2 00:00:00.0|;|$1/" >> $WEDI_RC
+    if [ "-b" = "$3" ]; then
+        printOut=`sed -n "/$sedPath\/[^\/]*$/p" "$WEDI_RC" | cut -d '|' -f2- | sort -n | tr '\n' '*' | cut -d ';' -f1 | rev | cut -d '*' -f2- | rev | tr '*' '\n' | rev | cut -d '/' -f1 | rev | sort | uniq -c | rev | cut -d ' ' -f1 | rev | cut -d '|' -f2`
+    else
+        printOut=`sed -n "/$sedPath\/[^\/]*$/p" "$WEDI_RC" | cut -d '|' -f2- | sort -n | tr '\n' '*' | cut -d ';' -f2 | cut -d '*' -f2- | rev | cut -d '*' -f2- | rev | tr '*' '\n' | rev | cut -d '/' -f1 | rev | sort | uniq`
+    fi
+    if [ "$platform" = "FreeBSD" ]; then
+        `sed -i '' "/^totomusispotomvymazat12345|$2\ 00:00:00.0|;|$sedPath\/$/d" "$WEDI_RC"`
+    else
+        `sed -i "/^totomusispotomvymazat12345|$2\ 00:00:00.0|;|$sedPath\/$/d" "$WEDI_RC"`
+    fi
+    if [ -z "$printOut" ]; then
+        if [ "-b" = "$3" ]; then
+            echo "ERR: Pred $2 00:00:00.0 v adresári nebol upravovaný žiadny súbor.">&2
+        else
+            echo "ERR: Po $2 00:00:00.0 v adresári nebol upravovaný žiadny súbor.">&2
+        fi
+        exit 5
+    else
+        echo "$printOut"
+        exit 0
+    fi
+}
+
+################################################################################
+################################################################################
+
+testRealPath
+testVariables
+if [ -f "$1" ] && [ 1 -eq "$#" ]; then
+    arg=`realpath "$1"`
+    editFile $nastroj "$arg"
+elif [ 0 -eq "$#" ]; then
+    arg=`pwd`
+    findLastFile "$arg"
+    editFile $nastroj "$lastFile"
+elif [ -d "$1" ] && [ 1 -eq "$#" ]; then
+    arg=`realpath "$1"`
+    findLastFile "$arg"
+    editFile $nastroj "$lastFile"
+elif [ "-m" = "$1" ] && [ 1 -eq "$#" ]; then
+    arg=`pwd`
+    findMostEdited "$arg"
+    editFile $nastroj "$mostEdited"
+elif [ "-m" = "$1" ] && [ -d "$2" ] && [ 2 -eq "$#" ]; then
+    arg=`realpath "$2"`
+    findMostEdited "$arg"
+    editFile $nastroj "$mostEdited"
+elif [ "-l" = "$1" ] && [ 1 -eq "$#" ]; then
+    arg=`pwd`
+    printAllEdited "$arg"
+elif [ "-l" = "$1" ] && [ -d "$2" ] && [ 2 -eq "$#" ]; then
+    arg=`realpath "$2"`
+    printAllEdited "$arg"
+elif echo "$2" | grep -qE "^[12][0-9]{3}-(0?[1-9]|10|11|12)-(0?[1-9]|[12][0-9]|3[01])$" ; then
+    if [ "-b" = "$1" ] && [ 2 -eq "$#" ]; then
+        arg=`pwd`
+        printDate "$arg" "$2" "$1"
+    elif [ "-b" = "$1" ] && [ -d "$3" ] && [ 3 -eq "$#" ]; then
+        arg=`realpath "$3"`
+        printDate "$arg" "$2" "$1"
+    elif [ "-a" = "$1" ] && [ 2 -eq "$#" ]; then
+        arg=`pwd`
+        printDate "$arg" "$2" "$1"
+    elif [ "-a" = "$1" ] && [ -d "$3" ] && [ 3 -eq "$#" ]; then
+        arg=`realpath "$3"`
+        printDate "$arg" "$2" "$1"
+    elif [ ! -d "$3" ]; then
+        echo "ERR: Zadajte adresár.">&2
+        exit 5
+    fi
+elif [ ! -f "$1" ] && [ 1 -eq "$#" ]; then
+    if [ "$platform" = "FreeBSD" ]; then
+        dirPath=`echo "$1" | rev | cut -d '/' -f2- | rev`
+        filePath=`echo "$1" | rev | cut -d '/' -f1 | rev`
+        arg="`realpath "$dirPath"`/$filePath"
+    else
+        arg=`realpath "$1"`
+    fi
+    editFile $nastroj "$arg"
+else
+    echo "ERR: Chybne zadané argumenty.">&2
+    exit 5
+fi
